@@ -346,6 +346,7 @@ pub async fn subscribe_transactions(
             failed: Some(false),
             account_include: vec![],
             account_exclude: vec![],
+            account_required: vec![],
         },
     );
 

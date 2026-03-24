@@ -41,6 +41,7 @@ message SubscribeRequestFilterTransactions {
     optional bool failed = 2;
     repeated string account_include = 3;
     repeated string account_exclude = 4;
+    repeated bytes account_required = 5;
 }
 
 message SubscribeRequestFilterBlocks {

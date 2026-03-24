@@ -247,6 +247,7 @@ async fn subscribe_transactions_filtered(
             failed: Some(false),
             account_include: vec![token_mint.to_string()],
             account_exclude: vec![],
+            account_required: vec![],
         },
     );
 
@@ -276,6 +277,9 @@ async fn subscribe_transactions_filtered(
         .subscribe(request_stream)
         .await?
         .into_inner();
+
+    println!("Transaction stream connected successfully");
+    println!("Filter: account_include=[{}]", token_mint);
 
     Ok(stream.map(|result| result.map_err(|e| stream::StreamError::StreamError(e.to_string()))))
 }
