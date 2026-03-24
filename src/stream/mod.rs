@@ -1,8 +1,11 @@
 pub mod yellowstone_client;
 pub mod websocket_client;
-pub mod polling_client;
 
-// Use polling client by default (works with any RPC endpoint)
-pub use polling_client::{
+// Use Yellowstone gRPC client (required architecture)
+pub use yellowstone_client::{
     subscribe_transactions, StreamError, TransactionUpdate, OurTransaction,
+    load_auth_config,
 };
+
+// Re-export the generated types
+pub use yellowstone_client::geyser::{self, SubscribeUpdate, SubscribeRequest, CommitmentLevel, SubscribeRequestFilterTransactions};

@@ -42,10 +42,10 @@ const SHYFT_GRPC_HOST: &str = "grpc.us.shyft.to";
 const SHYFT_GRPC_PORT: u16 = 443;
 
 /// Authentication configuration for different providers
-struct AuthConfig {
-    token: String,
-    header_name: String,
-    basic_auth: Option<String>,
+pub struct AuthConfig {
+    pub token: String,
+    pub header_name: String,
+    pub basic_auth: Option<String>,
 }
 
 impl Default for AuthConfig {
@@ -59,7 +59,7 @@ impl Default for AuthConfig {
 }
 
 /// Load credentials from environment variables based on provider
-fn load_auth_config(endpoint: &str) -> AuthConfig {
+pub fn load_auth_config(endpoint: &str) -> AuthConfig {
     if endpoint.contains("publicnode") {
         // PublicNode/AllNodes uses x-token header
         let token = std::env::var("PUBLICNODE_TOKEN")

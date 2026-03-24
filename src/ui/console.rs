@@ -39,6 +39,11 @@ impl ConsoleRenderer {
         println!("\x1b[90m{}\x1b[0m", "─".repeat(40));
     }
 
+    /// Print FDV header (alias for print_header)
+    pub fn print_fdv_header(&self, fdv_sol: Option<f64>) {
+        self.print_header(fdv_sol);
+    }
+
     /// Update and re-print header with new FDV
     pub fn update_fdv(&mut self, fdv_sol: f64) {
         self.last_fdv = Some(fdv_sol);

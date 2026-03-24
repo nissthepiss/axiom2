@@ -30,6 +30,11 @@ impl PriceEngine {
     pub fn set_price(&mut self, mint: Pubkey, price: f64) {
         self.prices.insert(mint, price);
     }
+
+    /// Update price for a specific mint (direct method)
+    pub fn update_price_for_mint(&mut self, mint: Pubkey, price: f64) {
+        self.prices.insert(mint, price);
+    }
 }
 
 impl Default for PriceEngine {

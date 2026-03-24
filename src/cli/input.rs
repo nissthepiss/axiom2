@@ -11,7 +11,7 @@ pub struct Cli {
     pub mint: String,
 
     /// Yellowstone gRPC endpoint
-    #[arg(short, long, default_value = "chainstack")]
+    #[arg(short, long, default_value = "default")]
     pub endpoint: String,
 
     /// Solana RPC endpoint
