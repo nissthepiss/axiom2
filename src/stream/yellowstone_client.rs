@@ -200,7 +200,7 @@ pub struct TransactionUpdate {
 pub struct OurTransaction {
     pub signatures: Vec<Vec<u8>>,
     pub message: Vec<u8>,
-    pub meta: Option<TransactionMeta>,
+    pub meta_bytes: Option<Vec<u8>>,
 }
 
 /// Subscribe to Yellowstone gRPC transaction stream
@@ -391,7 +391,7 @@ impl TransactionUpdate {
                     transaction: Some(OurTransaction {
                         signatures: vec![tx.transaction.as_ref().map(|t| t.signature.clone()).unwrap_or_default()],
                         message: tx.transaction.as_ref().map(|t| t.transaction.clone()).unwrap_or_default(),
-                        meta: None,
+                        meta_bytes: tx.transaction.as_ref().map(|t| t.meta.clone()),
                     }),
                 })
             }

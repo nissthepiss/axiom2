@@ -13,6 +13,7 @@ use crate::events::EventBus;
 use crate::stream::{OurTransaction, TransactionUpdate};
 use crate::types::Pubkey;
 use crate::ui::ConsoleRenderer;
+use crate::parser::{calculate_balance_deltas as parse_balance_deltas, TradeEvent};
 use tracing::info;
 
 use futures::{stream::Stream, StreamExt};
@@ -220,6 +221,7 @@ async fn process_transaction(
     decimals: u8,
     console: &mut ConsoleRenderer,
 ) {
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     match tx_update {
         TransactionUpdate {
@@ -227,84 +229,72 @@ async fn process_transaction(
             transaction: Some(tx),
             ..
         } => {
-            // Calculate balance deltas
-            if let Some((token_delta, sol_delta, wallet)) = calculate_balance_deltas(&tx, tracked_mint) {
-                // Determine trade type
-                let is_buy = token_delta > 0 && sol_delta < 0;
-                let is_sell = token_delta < 0 && sol_delta > 0;
+            // Parse transaction bytes
+            let meta_bytes = match &tx.meta_bytes {
+                Some(bytes) => bytes,
+                None => return,
+            };
 
-                // Filter out tiny SOL movements (fees)
-                const MIN_SOL_DELTA: i64 = 1_000_000; // 0.001 SOL in lamports
+            // Calculate balance deltas using the parser
+            let trades = match parse_balance_deltas(&tx.message, meta_bytes, tracked_mint) {
+                Ok(trades) => trades,
+                Err(e) => {
+                    eprintln!("Failed to parse balance deltas: {}", e);
+                    return;
+                }
+            };
 
-                if is_buy && sol_delta.abs() < MIN_SOL_DELTA {
-                    return; // Ignore fee-only movements
+            // Process each trade event
+            for trade in trades {
+                let trade_type = if trade.is_buy { "BUY" } else { "SELL" };
+
+                // Calculate price
+                let token_amount_abs = trade.token_delta.abs() as f64 / 10_f64.powi(decimals as i32);
+                let sol_amount_abs = trade.sol_delta.abs() as f64 / 1_000_000_000.0;
+
+                let price = if token_amount_abs > 0.0 {
+                    sol_amount_abs / token_amount_abs
+                } else {
+                    0.0
+                };
+
+                // Update price engine
+                price_engine.update_price_for_mint(*tracked_mint, price);
+
+                // Update FDV
+                if let Some(current_fdv) = fdv_engine.get_fdv_usd(tracked_mint, 0.0) {
+                    console.print_fdv_header(Some(current_fdv));
                 }
 
-                if is_buy || is_sell {
-                    let trade_type = if is_buy { "BUY" } else { "SELL" };
+                // Format wallet address (first 4 + last 4 chars)
+                let wallet_str = trade.wallet.to_string();
+                let wallet_short = format!(
+                    "{}...{}",
+                    &wallet_str[..4.min(wallet_str.len())],
+                    &wallet_str[wallet_str.len().saturating_sub(4)..]
+                );
 
-                    // Calculate price
-                    let token_amount_abs = token_delta.abs() as f64 / 10_f64.powi(decimals as i32);
-                    let sol_amount_abs = sol_delta.abs() as f64 / 1_000_000_000.0; // Convert lamports to SOL
+                // Format timestamp
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let secs = now % 86400;
+                let hours = secs / 3600;
+                let minutes = (secs % 3600) / 60;
+                let timestamp = format!("{:02}:{:02}:{:02}", hours, minutes, secs % 60);
 
-                    let price = if token_amount_abs > 0.0 {
-                        sol_amount_abs / token_amount_abs
-                    } else {
-                        0.0
-                    };
-
-                    // Update price engine
-                    price_engine.update_price_for_mint(*tracked_mint, price);
-
-                    // Update FDV
-                    if let Some(current_fdv) = fdv_engine.get_fdv_usd(tracked_mint, 0.0) {
-                        console.print_fdv_header(Some(current_fdv));
-                    }
-
-                    // Format wallet address (first 4 + last 4 chars)
-                    let wallet_short = format!(
-                        "{}...{}",
-                        &wallet.to_string()[..4],
-                        &wallet.to_string()[wallet.to_string().len()-4..]
-                    );
-
-                    // Format timestamp
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs();
-                    let secs = now % 86400;
-                    let hours = secs / 3600;
-                    let minutes = (secs % 3600) / 60;
-                    let timestamp = format!("{:02}:{:02}:{:02}", hours, minutes, secs % 60);
-
-                    // Print trade
-                    println!("{} {:>4} {:.2} SOL {} {}ms",
-                        timestamp,
-                        trade_type,
-                        sol_amount_abs,
-                        wallet_short,
-                        latency.as_millis()
-                    );
-                }
+                // Print trade
+                println!("{} {:>4} {:.2} SOL {} {}ms",
+                    timestamp,
+                    trade_type,
+                    sol_amount_abs,
+                    wallet_short,
+                    latency.as_millis()
+                );
             }
         }
         _ => {}
     }
-}
-
-/// Calculate balance deltas for a transaction
-fn calculate_balance_deltas(
-    _tx: &OurTransaction,
-    _tracked_mint: &Pubkey,
-) -> Option<(i64, i64, Pubkey)> {
-    // For now, we need to parse the transaction to get balance changes
-    // The current proto structure doesn't include pre/post balances
-    // TODO: Implement full transaction parsing
-
-    // This is a placeholder - we need to parse the transaction message
-    // to extract actual balance changes
-
-    None
 }
 
