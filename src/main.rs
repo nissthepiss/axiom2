@@ -1,3 +1,8 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unreachable_code)]
+
 mod cli;
 mod engine;
 mod events;
@@ -10,15 +15,15 @@ mod ui;
 use cli::resolve_mint;
 use crate::engine::{FdvEngine, PriceEngine};
 use crate::events::EventBus;
-use crate::stream::{OurTransaction, TransactionUpdate};
+use crate::stream::TransactionUpdate;
 use crate::stream::geyser;
 use crate::types::Pubkey;
 use crate::ui::ConsoleRenderer;
-use crate::parser::{calculate_balance_deltas as parse_balance_deltas, TradeEvent};
+use crate::parser::calculate_balance_deltas as parse_balance_deltas;
 use tracing::info;
 
 use futures::{stream::Stream, StreamExt};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
