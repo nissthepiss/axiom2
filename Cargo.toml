@@ -14,9 +14,6 @@ tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 url = "2.5"
 async-stream = "0.3"
 
-# HTTP client for polling
-reqwest = { version = "0.12", features = ["json"] }
-
 # gRPC - native Windows support
 tonic = { version = "0.12", features = ["tls", "transport", "channel", "tls-native-roots"] }
 prost = "0.13"
@@ -48,6 +45,7 @@ clap = { version = "4.5", features = ["derive"] }
 # Logging
 tracing = "0.1"
 tracing-subscriber = "0.3"
+tonic-reflection = "0.14.5"
 
 [build-dependencies]
 tonic-build = { version = "0.12", features = ["prost"] }

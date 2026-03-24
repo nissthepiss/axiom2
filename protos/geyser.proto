@@ -1,212 +1,120 @@
 syntax = "proto3";
+import "google/protobuf/timestamp.proto";
 
-package yellowstone.grpc;
+option go_package = "github.com/rpcpool/yellowstone-grpc/examples/golang/proto";
+
+package geyser;
 
 service Geyser {
-    rpc Subscribe (stream SubscribeRequest) returns (stream SubscribeUpdate);
+    rpc Subscribe(stream SubscribeRequest) returns (stream SubscribeUpdate) {}
+}
+
+enum CommitmentLevel {
+    PROCESSED = 0;
+    CONFIRMED = 1;
+    FINALIZED = 2;
 }
 
 message SubscribeRequest {
-    oneof message {
-        SubscribeRequestSubscribe subscribe = 2;
-    }
+    map<string, SubscribeRequestFilterAccounts> accounts = 1;
+    map<string, SubscribeRequestFilterSlots> slots = 2;
+    map<string, SubscribeRequestFilterTransactions> transactions = 3;
+    map<string, SubscribeRequestFilterBlocks> blocks = 4;
+    map<string, SubscribeRequestFilterBlocksMeta> blocks_meta = 5;
+    optional CommitmentLevel commitment = 6;
+    repeated SubscribeRequestAccountsDataSlice accounts_data_slice = 7;
+    map<string, SubscribeRequestFilterEntry> entry = 8;
+    optional SubscribeRequestPing ping = 9;
+}
 
-    message SubscribeRequestSubscribe {
-        map<string, SubscribeRequestFilterAccounts> accounts = 1;
-        map<string, SubscribeRequestFilterSlots> slots = 2;
-        map<string, SubscribeRequestFilterTransactions> transactions = 3;
-        map<string, SubscribeRequestFilterBlocks> blocks = 4;
-        map<string, SubscribeRequestFilterBlocksMeta> blocks_meta = 5;
-        map<string, SubscribeRequestFilterEntry> entry = 6;
-        CommitmentLevel commitment = 7;
-        repeated AccountDataSlice account_data_slice = 8;
-        map<string, string> ping = 9;
-    }
+message SubscribeRequestFilterAccounts {
+    repeated string account = 2;
+    repeated string owner = 3;
+}
 
-    message SubscribeRequestFilterAccounts {
-        repeated string account = 1;
-        repeated bytes account_owner = 2;
-        repeated bytes filters = 3;
-        string owner = 4;
-    }
+message SubscribeRequestFilterSlots {
+    optional bool filter_by_commitment = 1;
+}
 
-    message SubscribeRequestFilterSlots {
-        bool filter_by_commitment = 1;
-    }
+message SubscribeRequestFilterTransactions {
+    optional bool vote = 1;
+    optional bool failed = 2;
+    repeated string account_include = 3;
+    repeated string account_exclude = 4;
+}
 
-    message SubscribeRequestFilterTransactions {
-        repeated string account = 1;
-        repeated bytes account_include = 2;
-        repeated bytes account_exclude = 3;
-        repeated bytes account_required = 4;
-        FailWithConfig fail_with_config = 5;
-    }
+message SubscribeRequestFilterBlocks {
+    repeated string account_include = 1;
+    optional bool include_transactions = 2;
+    optional bool include_accounts = 3;
+    optional bool include_entries = 4;
+}
 
-    message SubscribeRequestFilterBlocks {
-        bool filter_by_commitment = 1;
-    }
+message SubscribeRequestFilterBlocksMeta {}
 
-    message SubscribeRequestFilterBlocksMeta {
-        bool filter_by_commitment = 1;
-    }
+message SubscribeRequestFilterEntry {}
 
-    message SubscribeRequestFilterEntry {
-        repeated bytes filters = 1;
-    }
+message SubscribeRequestAccountsDataSlice {
+    uint64 offset = 1;
+    uint64 length = 2;
+}
 
-    message FailWithConfig {
-        bool include_failed_transactions = 1;
-    }
+message SubscribeRequestPing {
+    int32 id = 1;
 }
 
 message SubscribeUpdate {
-    oneof message {
-        SubscribeUpdateAccount account = 1;
-        SubscribeUpdateSlot slot = 2;
-        SubscribeUpdateTransaction transaction = 3;
-        SubscribeUpdateTransactionStatus transaction_status = 4;
-        SubscribeUpdateBlock block = 5;
-        SubscribeUpdateBlockMeta block_meta = 6;
-        SubscribeUpdateEntry entry = 7;
-        SubscribeUpdatePing ping = 8;
+    repeated string filters = 1;
+    oneof update_oneof {
+        SubscribeUpdateAccount account = 2;
+        SubscribeUpdateSlot slot = 3;
+        SubscribeUpdateTransaction transaction = 4;
+        SubscribeUpdatePing ping = 6;
         SubscribeUpdatePong pong = 9;
-        SubscribeUpdateHealth ping_health = 10;
-        SubscribeUpdateHealth pong_health = 11;
+        SubscribeUpdateBlockMeta block_meta = 7;
     }
+    google.protobuf.Timestamp created_at = 11;
 }
 
 message SubscribeUpdateAccount {
-    uint64 slot = 1;
-    Account account = 2;
-    uint64 lamports = 3;
-    bytes owner = 4;
-    bool executable = 5;
-    uint64 rent_epoch = 6;
-    bytes data = 7;
-    bool write_version = 8;
-    bytes txn_signature = 9;
+    SubscribeUpdateAccountInfo account = 1;
+    uint64 slot = 2;
+}
+
+message SubscribeUpdateAccountInfo {
+    bytes pubkey = 1;
+    uint64 lamports = 2;
+    bytes owner = 3;
+    bool executable = 4;
+    uint64 rent_epoch = 5;
+    bytes data = 6;
+    uint64 write_version = 7;
+    optional bytes txn_signature = 8;
 }
 
 message SubscribeUpdateSlot {
     uint64 slot = 1;
-    SlotStatus parent = 2;
-    SlotStatus status = 3;
+    optional uint64 parent = 2;
 }
 
 message SubscribeUpdateTransaction {
-    uint64 slot = 1;
-    Transaction transaction = 2;
-}
-
-message SubscribeUpdateTransactionStatus {
-    uint64 slot = 1;
-    TransactionStatus transaction = 2;
-}
-
-message SubscribeUpdateBlock {
-    uint64 slot = 1;
-    BlockInfo block_info = 2;
-}
-
-message SubscribeUpdateBlockMeta {
-    uint64 slot = 1;
-    BlockMeta block_meta = 2;
-}
-
-message SubscribeUpdateEntry {
-    uint64 slot = 1;
-    Entry entry = 2;
-}
-
-message SubscribeUpdatePing {
-}
-
-message SubscribeUpdatePong {
-}
-
-message SubscribeUpdateHealth {
-}
-
-enum SlotStatus {
-    SLOT_PROCESSED = 0;
-    SLOT_CONFIRMED = 1;
-    SLOT_FINALIZED = 2;
-}
-
-enum CommitmentLevel {
-    COMMITMENT_PROCESSED = 0;
-    COMMITMENT_CONFIRMED = 1;
-    COMMITMENT_FINALIZED = 2;
-}
-
-message Account {
-    bytes pubkey = 1;
-    uint64 lamports = 2;
-    bytes owner = 4;
-    bool executable = 5;
-    uint64 rent_epoch = 6;
-    bytes data = 7;
-    bool write_version = 8;
-    bytes txn_signature = 9;
-}
-
-message Transaction {
-    repeated bytes signatures = 1;
-    bytes message = 2;
-    TransactionMeta meta = 3;
-}
-
-message TransactionMeta {
-    bytes error = 1;
-    uint64 fee = 2;
-    repeated uint64 pre_balances = 3;
-    repeated uint64 post_balances = 4;
-    repeated bytes pre_token_balances = 5;
-    repeated bytes post_token_balances = 6;
-    repeated InnerInstructions inner_instructions = 7;
-    bool is_inner_instructions = 8;
-}
-
-message InnerInstructions {
-    bytes account = 1;
-    repeated bytes instructions = 2;
-}
-
-message TokenBalance {
-    uint32 account_index = 1;
-    bytes mint = 2;
-    UiTokenAmount ui_token_amount = 3;
-    bytes owner = 4;
-}
-
-message UiTokenAmount {
-    string amount = 1;
-    uint32 decimals = 2;
-    string ui_amount_string = 3;
-    double ui_amount = 4;
-}
-
-message TransactionStatus {
-    bytes signature = 1;
+    SubscribeUpdateTransactionInfo transaction = 1;
     uint64 slot = 2;
 }
 
-message BlockInfo {
-    bytes parent_slot = 1;
+message SubscribeUpdateTransactionInfo {
+    bytes signature = 1;
+    bool is_vote = 2;
+    bytes transaction = 3;
+    bytes meta = 4;
+    uint64 index = 5;
 }
 
-message BlockMeta {
-    bytes parent_slot = 1;
-}
+message SubscribeUpdatePing {}
 
-message Entry {
-}
+message SubscribeUpdatePong {}
 
-message AccountDataSlice {
-}
-
-enum AccountDataFilter {
-    VOTE = 0;
-    NON_VOTE = 1;
-    ALL = 2;
+message SubscribeUpdateBlockMeta {
+    uint64 slot = 1;
+    string blockhash = 2;
 }

@@ -1,6 +1,6 @@
 // Generated protobuf types
 pub mod geyser {
-    tonic::include_proto!("yellowstone.grpc");
+    tonic::include_proto!("geyser");
 }
 
 // Import the generated types at the correct level
@@ -8,9 +8,9 @@ use geyser::{
     geyser_client::GeyserClient as TonicGeyserClient,
     SubscribeRequest,
     SubscribeUpdate,
-    subscribe_request::{Message as SubscribeRequestMessage, SubscribeRequestSubscribe, SubscribeRequestFilterTransactions, SubscribeRequestFilterSlots, FailWithConfig},
-    subscribe_update::Message as SubscribeUpdateMessage,
+    subscribe_update::UpdateOneof as SubscribeUpdateMessage,
     CommitmentLevel,
+    SubscribeRequestFilterSlots,
 };
 use futures::{stream::Stream, StreamExt};
 use std::collections::HashMap;
@@ -21,22 +21,116 @@ use tonic::metadata::{MetadataKey, MetadataValue};
 use base64::Engine as _;
 use tokio_stream::wrappers::ReceiverStream;
 
-/// Chainstack Yellowstone gRPC endpoint
+/// PublicNode - Free public Yellowstone gRPC endpoint (WORKS ON WINDOWS)
+const PUBLICNODE_GRPC_HOST: &str = "solana-yellowstone-grpc.publicnode.com";
+const PUBLICNODE_GRPC_PORT: u16 = 443;
+
+/// Chainstack Yellowstone gRPC endpoint (returns UNIMPLEMENTED for Subscribe)
 const CHAINSTACK_GRPC_HOST: &str = "yellowstone-solana-mainnet.core.chainstack.com";
 const CHAINSTACK_GRPC_PORT: u16 = 443;
 
-/// Load credentials from environment variables
-fn load_chainstack_credentials() -> (String, String, String) {
-    let token = std::env::var("CHAINSTACK_X_TOKEN")
-        .unwrap_or_else(|_| "322e4e2a19ffade6ebb982ddf1d8d62d".to_string());
+/// GetBlock Yellowstone gRPC endpoint (requires dedicated node + token)
+const GETBLOCK_GRPC_HOST: &str = "go.getblock.io";
+const GETBLOCK_GRPC_PORT: u16 = 443;
 
-    let username = std::env::var("CHAINSTACK_USERNAME")
-        .unwrap_or_else(|_| "loving-jepsen".to_string());
+/// Tatum Yellowstone gRPC endpoint (free API key available)
+const TATUM_GRPC_HOST: &str = "solana-mainnet-grpc.gateway.tatum.io";
+const TATUM_GRPC_PORT: u16 = 443;
 
-    let password = std::env::var("CHAINSTACK_PASSWORD")
-        .unwrap_or_else(|_| "haven-shiny-purple-perch-tacky-ramp".to_string());
+/// Shyft Yellowstone gRPC endpoint
+const SHYFT_GRPC_HOST: &str = "grpc.us.shyft.to";
+const SHYFT_GRPC_PORT: u16 = 443;
 
-    (token, username, password)
+/// Authentication configuration for different providers
+struct AuthConfig {
+    token: String,
+    header_name: String,
+    basic_auth: Option<String>,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        AuthConfig {
+            token: String::new(),
+            header_name: "x-token".to_string(),
+            basic_auth: None,
+        }
+    }
+}
+
+/// Load credentials from environment variables based on provider
+fn load_auth_config(endpoint: &str) -> AuthConfig {
+    if endpoint.contains("publicnode") {
+        // PublicNode/AllNodes uses x-token header
+        let token = std::env::var("PUBLICNODE_TOKEN")
+            .or_else(|_| std::env::var("ALLNODES_TOKEN"))
+            .unwrap_or_default();
+
+        AuthConfig {
+            token,
+            header_name: "x-token".to_string(),
+            basic_auth: None,
+        }
+    } else if endpoint.contains("chainstack") {
+        // Chainstack uses x-token + basic auth
+        let token = std::env::var("CHAINSTACK_X_TOKEN").unwrap_or_default();
+        let username = std::env::var("CHAINSTACK_USERNAME").unwrap_or_default();
+        let password = std::env::var("CHAINSTACK_PASSWORD").unwrap_or_default();
+
+        let basic_auth = if !username.is_empty() && !password.is_empty() {
+            let auth_value = format!("{}:{}", username, password);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(auth_value);
+            Some(format!("Basic {}", encoded))
+        } else {
+            None
+        };
+
+        AuthConfig {
+            token,
+            header_name: "x-token".to_string(),
+            basic_auth,
+        }
+    } else if endpoint.contains("getblock") {
+        // GetBlock uses token in URL path, but we can also use x-token
+        let token = std::env::var("GETBLOCK_TOKEN").unwrap_or_default();
+
+        AuthConfig {
+            token,
+            header_name: "x-token".to_string(),
+            basic_auth: None,
+        }
+    } else if endpoint.contains("tatum") {
+        // Tatum uses x-api-key header
+        let token = std::env::var("TATUM_API_KEY")
+            .or_else(|_| std::env::var("API_KEY"))
+            .unwrap_or_default();
+
+        AuthConfig {
+            token,
+            header_name: "x-api-key".to_string(),
+            basic_auth: None,
+        }
+    } else if endpoint.contains("shyft") {
+        // Shyft uses x-token header
+        let token = std::env::var("SHYFT_TOKEN").unwrap_or_default();
+
+        AuthConfig {
+            token,
+            header_name: "x-token".to_string(),
+            basic_auth: None,
+        }
+    } else {
+        // Default: try generic TOKEN variable
+        let token = std::env::var("TOKEN")
+            .or_else(|_| std::env::var("API_KEY"))
+            .unwrap_or_default();
+
+        AuthConfig {
+            token,
+            header_name: "x-token".to_string(),
+            basic_auth: None,
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -49,9 +143,6 @@ pub enum StreamError {
 
     #[error("Subscription failed: {0}")]
     SubscriptionError(String),
-
-    #[error("RPC error: {0}")]
-    RpcError(String),
 }
 
 impl From<anyhow::Error> for StreamError {
@@ -116,31 +207,53 @@ pub struct OurTransaction {
 pub async fn subscribe_transactions(
     endpoint: &str,
 ) -> Result<impl Stream<Item = Result<SubscribeUpdate, StreamError>>, StreamError> {
-    // Load credentials from environment
-    let (token, username, password) = load_chainstack_credentials();
+    // Load authentication configuration based on endpoint
+    let auth_config = load_auth_config(endpoint);
 
     // Determine the actual endpoint to use
-    let actual_endpoint = if endpoint.contains("chainstack") || endpoint.contains("yellowstone-solana-mainnet") {
+    let actual_endpoint = if endpoint.contains("publicnode") {
+        // PublicNode - Free public Yellowstone endpoint (WORKS ON WINDOWS)
+        format!("https://{}:{}", PUBLICNODE_GRPC_HOST, PUBLICNODE_GRPC_PORT)
+    } else if endpoint.contains("chainstack") || endpoint.contains("yellowstone-solana-mainnet") {
         format!("https://{}:{}", CHAINSTACK_GRPC_HOST, CHAINSTACK_GRPC_PORT)
+    } else if endpoint.contains("getblock") {
+        // GetBlock Yellowstone gRPC (requires token)
+        format!("https://{}:{}", GETBLOCK_GRPC_HOST, GETBLOCK_GRPC_PORT)
+    } else if endpoint.contains("tatum") {
+        // Tatum - Free API key available at tatum.io/chain/solana
+        format!("https://{}:{}", TATUM_GRPC_HOST, TATUM_GRPC_PORT)
+    } else if endpoint.contains("shyft") {
+        // Shyft - Yellowstone gRPC endpoint
+        format!("https://{}:{}", SHYFT_GRPC_HOST, SHYFT_GRPC_PORT)
     } else if endpoint.contains("genesysgo") {
         "https://yellowstone.genesysgo.net:443".to_string()
-    } else if endpoint.contains("alchemy") {
-        "https://solana-mainnet.g.alchemy.com:443".to_string()
     } else if endpoint.is_empty() || endpoint == "default" {
-        // Use Chainstack by default
-        format!("https://{}:{}", CHAINSTACK_GRPC_HOST, CHAINSTACK_GRPC_PORT)
+        // Use Tatum by default (free API key available)
+        format!("https://{}:{}", TATUM_GRPC_HOST, TATUM_GRPC_PORT)
     } else {
         endpoint.to_string()
     };
 
-    let use_auth = actual_endpoint.contains("chainstack") || actual_endpoint.contains(CHAINSTACK_GRPC_HOST);
+    let use_auth = !auth_config.token.is_empty() ||
+                    actual_endpoint.contains("chainstack") ||
+                    actual_endpoint.contains(CHAINSTACK_GRPC_HOST) ||
+                    actual_endpoint.contains(TATUM_GRPC_HOST) ||
+                    actual_endpoint.contains(SHYFT_GRPC_HOST);
 
     println!("Connecting to Yellowstone at: {} (auth: {})", actual_endpoint, use_auth);
+    if use_auth {
+        println!("Auth header: {}", auth_config.header_name);
+        if !auth_config.token.is_empty() {
+            println!("Token: {}***", &auth_config.token[..auth_config.token.len().min(8)]);
+        } else {
+            println!("WARNING: No token configured - set environment variable");
+        }
+    }
     println!("Service: yellowstone.grpc.Geyser");
     println!("Method: Subscribe");
 
-    // Check if we need TLS - for Chainstack, always use TLS
-    let use_tls = use_auth || actual_endpoint.starts_with("https://");
+    // Check if we need TLS - for all HTTPS endpoints
+    let use_tls = actual_endpoint.starts_with("https://");
 
     // Create channel with TLS configuration
     let channel = Channel::from_shared(actual_endpoint)
@@ -149,7 +262,7 @@ pub async fn subscribe_transactions(
 
     // Add TLS config for HTTPS endpoints
     let channel = if use_tls {
-        // For development, skip certificate verification
+        // For development/testing, use native roots
         // TODO: Enable proper certificate verification for production
         channel.tls_config(
             ClientTlsConfig::new().with_native_roots()
@@ -172,40 +285,45 @@ pub async fn subscribe_transactions(
 
     println!("Yellowstone client created");
 
-    // Create client with authentication (for Chainstack)
-    // Always use interceptor for consistent type
-    let token_header = token.clone();
-    let basic_auth = if use_auth {
-        let auth_value = format!("{}:{}", username, password);
-        let encoded = base64::engine::general_purpose::STANDARD.encode(auth_value);
-        Some(format!("Basic {}", encoded))
-    } else {
-        None
-    };
+    // Create client with authentication interceptor
+    let header_name = auth_config.header_name.clone();
+    let token_value = auth_config.token.clone();
+    let basic_auth = auth_config.basic_auth.clone();
 
-    println!("Using authentication: x-token={}, basic_auth={}", !token_header.is_empty(), basic_auth.is_some());
+    println!("Using authentication: {}={}, basic_auth={}",
+             header_name,
+             !token_value.is_empty(),
+             basic_auth.is_some());
 
     // Clone use_auth for the closure
     let use_auth_copy = use_auth;
 
     let mut client = TonicGeyserClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
-        // Add x-token header (for Chainstack)
+        // Add authentication header
         if use_auth_copy {
-            match MetadataValue::try_from(&token_header) {
-                Ok(val) => {
-                    req.metadata_mut().insert("x-token", val);
+            // Add the token header (x-token, x-api-key, etc.)
+            if !token_value.is_empty() {
+                match MetadataKey::from_bytes(header_name.as_bytes()) {
+                    Ok(key) => {
+                        match MetadataValue::try_from(&token_value) {
+                            Ok(val) => {
+                                req.metadata_mut().insert(key, val);
+                            }
+                            Err(_) => return Err(tonic::Status::unauthenticated("Invalid token format")),
+                        }
+                    }
+                    Err(_) => return Err(tonic::Status::unauthenticated("Invalid header name")),
                 }
-                Err(_) => return Err(tonic::Status::unauthenticated("Invalid token format")),
             }
 
-            // Add basic authorization header
+            // Add basic authorization header (for Chainstack)
             if let Some(auth_value) = &basic_auth {
                 match MetadataValue::try_from(auth_value.as_str()) {
                     Ok(val) => {
                         req.metadata_mut().insert("authorization", val);
                     }
                     Err(_) => {
-                        // If basic auth fails, still try with just x-token
+                        // If basic auth fails, still try with just the token
                     }
                 }
             }
@@ -219,24 +337,20 @@ pub async fn subscribe_transactions(
     slots_map.insert(
         "client".to_string(),
         SubscribeRequestFilterSlots {
-            filter_by_commitment: false,
+            filter_by_commitment: Some(false),
         },
     );
 
     let subscription = SubscribeRequest {
-        message: Some(SubscribeRequestMessage::Subscribe(
-            SubscribeRequestSubscribe {
-                accounts: HashMap::new(),
-                slots: slots_map,
-                transactions: HashMap::new(),
-                blocks: HashMap::new(),
-                blocks_meta: HashMap::new(),
-                entry: HashMap::new(),
-                commitment: CommitmentLevel::CommitmentProcessed as i32,
-                account_data_slice: vec![],
-                ping: HashMap::new(),
-            },
-        )),
+        accounts: HashMap::new(),
+        slots: slots_map,
+        transactions: HashMap::new(),
+        blocks: HashMap::new(),
+        blocks_meta: HashMap::new(),
+        entry: HashMap::new(),
+        commitment: Some(CommitmentLevel::Processed as i32),
+        accounts_data_slice: vec![],
+        ping: None,
     };
 
     println!("Subscribing to slots...");
@@ -265,41 +379,20 @@ pub async fn subscribe_transactions(
 
 impl TransactionUpdate {
     pub fn from_update(update: &SubscribeUpdate) -> Option<Self> {
-        match &update.message {
+        match &update.update_oneof {
             Some(SubscribeUpdateMessage::Transaction(tx)) => {
                 println!("✓ Transaction in slot: {}", tx.slot);
                 if let Some(transaction) = &tx.transaction {
-                    let empty_sig = vec![];
-                    let sig = transaction.signatures.get(0).unwrap_or(&empty_sig);
-                    println!("  Signature: {}", bs58::encode(sig).into_string());
+                    println!("  Signature: {}", bs58::encode(&transaction.signature).into_string());
                 }
 
                 Some(TransactionUpdate {
                     slot: tx.slot,
                     transaction: Some(OurTransaction {
-                        signatures: tx.transaction.as_ref()
-                            .map(|t| t.signatures.clone())
-                            .unwrap_or_default(),
-                        message: tx.transaction.as_ref()
-                            .map(|t| t.message.clone())
-                            .unwrap_or_default(),
-                        meta: tx.transaction.as_ref()
-                            .and_then(|t| t.meta.as_ref())
-                            .map(|m| TransactionMeta {
-                                error: if m.error.is_empty() { None } else { Some(m.error.clone()) },
-                                fee: m.fee,
-                                pre_balances: m.pre_balances.clone(),
-                                post_balances: m.post_balances.clone(),
-                                pre_token_balances: vec![],
-                                post_token_balances: vec![],
-                            }),
+                        signatures: vec![tx.transaction.as_ref().map(|t| t.signature.clone()).unwrap_or_default()],
+                        message: tx.transaction.as_ref().map(|t| t.transaction.clone()).unwrap_or_default(),
+                        meta: None,
                     }),
-                })
-            }
-            Some(SubscribeUpdateMessage::TransactionStatus(status)) => {
-                Some(TransactionUpdate {
-                    slot: status.slot,
-                    transaction: None,
                 })
             }
             Some(SubscribeUpdateMessage::Slot(slot)) => {
@@ -308,6 +401,14 @@ impl TransactionUpdate {
             }
             Some(SubscribeUpdateMessage::Ping(_ping)) => {
                 println!("ping received");
+                None
+            }
+            Some(SubscribeUpdateMessage::Pong(_pong)) => {
+                println!("pong received");
+                None
+            }
+            Some(SubscribeUpdateMessage::BlockMeta(block_meta)) => {
+                println!("block meta: {}", block_meta.slot);
                 None
             }
             _ => None,
