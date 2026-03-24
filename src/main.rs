@@ -22,6 +22,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load environment variables from .env file
+    dotenvy::dotenv().ok();
+
     // Install default CryptoProvider for rustls
     rustls::crypto::ring::default_provider().install_default().unwrap();
 

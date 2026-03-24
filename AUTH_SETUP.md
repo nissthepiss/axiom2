@@ -2,30 +2,45 @@
 
 This project requires Chainstack Yellowstone gRPC credentials to receive real-time Solana transaction data.
 
-## Required Environment Variables
+## Quick Start (Recommended)
 
-Set the following environment variables before running the binary:
+The project uses `.env` files for automatic credential loading. Simply run:
+
+```bash
+cargo run --release
+```
+
+The `.env` file is already configured with the required credentials.
+
+## Manual Environment Variable Setup
+
+If you prefer to set environment variables manually instead of using `.env`:
+
+### Linux/macOS
 
 ```bash
 export CHAINSTACK_X_TOKEN="322e4e2a19ffade6ebb982ddf1d8d62d"
 export CHAINSTACK_USERNAME="loving-jepsen"
 export CHAINSTACK_PASSWORD="haven-shiny-purple-perch-tacky-ramp"
+cargo run --release
 ```
 
-## Windows (Command Prompt)
+### Windows (Command Prompt)
 
 ```cmd
 set CHAINSTACK_X_TOKEN=322e4e2a19ffade6ebb982ddf1d8d62d
 set CHAINSTACK_USERNAME=loving-jepsen
 set CHAINSTACK_PASSWORD=haven-shiny-purple-perch-tacky-ramp
+cargo run --release
 ```
 
-## Windows (PowerShell)
+### Windows (PowerShell)
 
 ```powershell
 $env:CHAINSTACK_X_TOKEN="322e4e2a19ffade6ebb982ddf1d8d62d"
 $env:CHAINSTACK_USERNAME="loving-jepsen"
 $env:CHAINSTACK_PASSWORD="haven-shiny-purple-perch-tacky-ramp"
+cargo run --release
 ```
 
 ## Verification
