@@ -168,6 +168,10 @@ async fn subscribe_transactions_filtered(
         Ok(req)
     });
 
+    // IMPORTANT ARCHITECTURE RULE:
+    // This system relies exclusively on Yellowstone gRPC transaction streams.
+    // Do NOT implement RPC polling, slot-only subscriptions, or websocket fallbacks.
+
     // Create subscription request filtered by token mint
     let mut transactions_map = HashMap::new();
     transactions_map.insert(

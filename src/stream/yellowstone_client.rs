@@ -11,6 +11,7 @@ use geyser::{
     subscribe_update::UpdateOneof as SubscribeUpdateMessage,
     CommitmentLevel,
     SubscribeRequestFilterSlots,
+    SubscribeRequestFilterTransactions,
 };
 use futures::{stream::Stream, StreamExt};
 use std::collections::HashMap;
@@ -332,19 +333,26 @@ pub async fn subscribe_transactions(
         Ok(req)
     });
 
-    // Create subscription request - subscribe only to slots with filter
-    let mut slots_map = HashMap::new();
-    slots_map.insert(
+    // IMPORTANT ARCHITECTURE RULE:
+    // This system relies exclusively on Yellowstone gRPC transaction streams.
+    // Do NOT implement RPC polling, slot-only subscriptions, or websocket fallbacks.
+
+    // Create subscription request - subscribe to ALL transactions
+    let mut transactions_map = HashMap::new();
+    transactions_map.insert(
         "client".to_string(),
-        SubscribeRequestFilterSlots {
-            filter_by_commitment: Some(false),
+        SubscribeRequestFilterTransactions {
+            vote: Some(false),
+            failed: Some(false),
+            account_include: vec![],
+            account_exclude: vec![],
         },
     );
 
     let subscription = SubscribeRequest {
         accounts: HashMap::new(),
-        slots: slots_map,
-        transactions: HashMap::new(),
+        slots: HashMap::new(),
+        transactions: transactions_map,
         blocks: HashMap::new(),
         blocks_meta: HashMap::new(),
         entry: HashMap::new(),
@@ -353,7 +361,7 @@ pub async fn subscribe_transactions(
         ping: None,
     };
 
-    println!("Subscribing to slots...");
+    println!("Subscribing to transactions...");
 
     // Create a channel for bidirectional streaming
     let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -395,20 +403,20 @@ impl TransactionUpdate {
                     }),
                 })
             }
-            Some(SubscribeUpdateMessage::Slot(slot)) => {
-                println!("slot: {}", slot.slot);
+            Some(SubscribeUpdateMessage::Slot(_slot)) => {
+                // Ignore slot updates - we only care about transactions
                 None
             }
             Some(SubscribeUpdateMessage::Ping(_ping)) => {
-                println!("ping received");
+                // Ignore pings
                 None
             }
             Some(SubscribeUpdateMessage::Pong(_pong)) => {
-                println!("pong received");
+                // Ignore pongs
                 None
             }
-            Some(SubscribeUpdateMessage::BlockMeta(block_meta)) => {
-                println!("block meta: {}", block_meta.slot);
+            Some(SubscribeUpdateMessage::BlockMeta(_block_meta)) => {
+                // Ignore block metadata
                 None
             }
             _ => None,
