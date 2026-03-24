@@ -39,17 +39,24 @@ cargo run --release
 You should see output like:
 
 ```
-✅ VALIDATION PASSED: Transaction data received from Yellowstone
-   First transaction arrived after 0.01s
+Subscribing to transactions for token: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+Transaction stream connected successfully
+Filter: account_include=[EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v]
 
-✓ Transaction in slot: 408635046
-  Signature: 3Y6S9oy3WnFDwqRnqwEsA4dJ4xZNXZvTyWPjFr6GXdbgMf88DUDrN3eqSSo7S1ggsQmt1M5KSLzWDN5ryK4UbqqD
+✅ VALIDATION PASSED: Transaction data received from Yellowstone
+   First transaction arrived after 0.02s
+
+✓ Transaction in slot: 408636443
+  Signature: 5BCUZQZFEKwBDfQdR1mKZRAhGggCKsXktkciMZbLL9VqwxjVUg3YeWC3piSHWcnPZ4qQmT8jiBar5ercbrYSxgbK
 ```
 
 If you see authentication errors instead, verify:
 1. All three environment variables are set
 2. The credentials are correct
 3. You have network access to Chainstack's Yellowstone endpoint
+
+If you see "Unexpected EOF decoding stream", the transaction filter may be
+misconfigured. The system uses `account_include` with the tracked mint address.
 
 ## Architecture Rule
 
