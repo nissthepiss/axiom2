@@ -11,6 +11,7 @@ use cli::resolve_mint;
 use crate::engine::{FdvEngine, PriceEngine};
 use crate::events::EventBus;
 use crate::stream::{OurTransaction, TransactionUpdate};
+use crate::stream::geyser;
 use crate::types::Pubkey;
 use crate::ui::ConsoleRenderer;
 use crate::parser::{calculate_balance_deltas as parse_balance_deltas, TradeEvent};
@@ -37,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Default RPC endpoint (use public RPC for metadata fetching)
     let rpc_url = "https://api.mainnet-beta.solana.com";
-    let endpoint = "chainstack";
+    let endpoint = "chainstack"; // Chainstack Yellowstone gRPC
 
     // Fetch token metadata from RPC
     let metadata = cli::fetch_token_metadata(&mint, rpc_url).await?;
@@ -67,6 +68,9 @@ async fn main() -> anyhow::Result<()> {
     info!("Streaming transactions...");
 
     // Main event loop with latency tracking
+    let mut tx_count = 0u64;
+    let stream_start = Instant::now();
+
     loop {
         tokio::select! {
             // Process incoming stream updates
@@ -78,8 +82,46 @@ async fn main() -> anyhow::Result<()> {
             } => {
                 let (update_result, latency) = result;
 
+                // Debug: log all results
+                if let Err(ref e) = update_result {
+                    eprintln!("⚠️  Stream error: {:?}", e);
+                }
+
                 if let Ok(update) = update_result {
+                    // Debug: log update type
+                    match &update.update_oneof {
+                        Some(geyser::subscribe_update::UpdateOneof::Transaction(_)) => {
+                            // Transaction - will be processed below
+                        }
+                        Some(geyser::subscribe_update::UpdateOneof::Slot(s)) => {
+                            eprintln!("⚠️  WARNING: Received slot update (not transaction): slot={}", s.slot);
+                        }
+                        Some(geyser::subscribe_update::UpdateOneof::Account(_)) => {
+                            eprintln!("📝 Account update received");
+                        }
+                        Some(geyser::subscribe_update::UpdateOneof::Ping(_)) => {
+                            eprintln!("📡 Ping received");
+                        }
+                        Some(geyser::subscribe_update::UpdateOneof::Pong(_)) => {
+                            eprintln!("📡 Pong received");
+                        }
+                        Some(geyser::subscribe_update::UpdateOneof::BlockMeta(b)) => {
+                            eprintln!("📦 Block meta: slot={}", b.slot);
+                        }
+                        None => {
+                            eprintln!("⚠️  Empty update received");
+                        }
+                    }
+
                     if let Some(tx_update) = TransactionUpdate::from_update(&update) {
+                        tx_count += 1;
+
+                        // First transaction received - validation passed
+                        if tx_count == 1 {
+                            println!("\n✅ VALIDATION PASSED: Transaction data received from Yellowstone");
+                            println!("   First transaction arrived after {:.2}s\n", stream_start.elapsed().as_secs_f64());
+                        }
+
                         process_transaction(
                             tx_update,
                             &mint,
@@ -92,11 +134,35 @@ async fn main() -> anyhow::Result<()> {
                         ).await;
                     }
                 }
+
+                // Runtime validation: fail if no transactions after 10 seconds
+                let elapsed = stream_start.elapsed();
+                if elapsed.as_secs() >= 10 && tx_count == 0 {
+                    panic!(
+                        "\n❌ TEST FAILURE: No transactions received from Yellowstone stream after {:.1}s\n\
+                         This indicates the Yellowstone subscription is broken.\n\
+                         Possible causes:\n\
+                         - Wrong endpoint URL\n\
+                         - Authentication failure\n\
+                         - Subscription configured for slots instead of transactions\n\
+                         - Network connectivity issue\n\
+                         - Yellowstone service unavailable\n\
+                         \n\
+                         Current status:\n\
+                         - Endpoint: {}\n\
+                         - Subscription: transactions (not slots)\n\
+                         - Tracking token: {}\n",
+                        elapsed.as_secs_f64(),
+                        endpoint,
+                        mint
+                    );
+                }
             }
 
             // Handle shutdown
             _ = tokio::signal::ctrl_c() => {
                 println!("\nShutting down...");
+                println!("Total transactions received: {}", tx_count);
                 break;
             }
         }
