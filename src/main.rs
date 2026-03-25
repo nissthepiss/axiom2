@@ -61,9 +61,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Print UI header
     console.print_banner();
-    let mint_str = mint.to_string();
-    println!("  \x1b[38;5;245mMint: {}...{}\x1b[0m", &mint_str[..4], &mint_str[mint_str.len()-4..]);
-    console.print_fdv_header(None);
+    console.print_fdv_header(None, &mint.to_string());
 
     // Subscribe to Yellowstone stream with transaction filter
     info!("Connecting to Yellowstone gRPC at {}...", endpoint);
@@ -274,7 +272,7 @@ async fn process_transaction(
                 if let Some(fdv_sol) = fdv_engine.get_fdv_sol(tracked_mint) {
                     let fdv_usd = fdv_sol * sol_price;
                     let fdv_str = crate::engine::FdvEngine::format_fdv(fdv_usd);
-                    eprint!("\x1b[s\x1b[6;1H\x1b[2K  \x1b[38;5;245mMarket Cap (FDV):\x1b[0m \x1b[1;37m{}\x1b[0m\x1b[u", fdv_str);
+                    eprint!("\x1b[s\x1b[7;1H\x1b[2K  \x1b[38;5;245mMarket Cap (FDV):\x1b[0m \x1b[1;38;5;208m{}\x1b[0m\x1b[u", fdv_str);
                 }
 
                 // Format wallet address (first 4 + last 4 chars)

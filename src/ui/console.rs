@@ -45,29 +45,24 @@ impl ConsoleRenderer {
         println!("  {GREY}{}{RESET}", "─".repeat(45));
     }
 
-    /// Print header: mint, SYMBOL - Name, FDV, separator
-    pub fn print_header(&self, fdv_sol: Option<f64>) {
+    /// Print header: SYMBOL - Name, Contract Address, FDV, separator
+    pub fn print_header(&self, fdv_sol: Option<f64>, mint_address: &str) {
         let fdv_display = if let Some(fdv) = fdv_sol {
             let fdv_usd = fdv * self.sol_price;
-            format!("{WHITE_BOLD}{}{RESET}", crate::engine::FdvEngine::format_fdv(fdv_usd))
+            format!("{ORANGE_BOLD}{}{RESET}", crate::engine::FdvEngine::format_fdv(fdv_usd))
         } else {
             format!("{GREY}Calculating...{RESET}")
         };
 
         println!("  {ORANGE_BOLD}{}{RESET} {GREY}-{RESET} {WHITE_BOLD}{}{RESET}", self.token_symbol, self.token_name);
+        println!("  {GREY}Contract Address: {}{RESET}", mint_address);
         println!("  {GREY}Market Cap (FDV):{RESET} {fdv_display}");
         println!("  {GREY}{}{RESET}", "─".repeat(45));
     }
 
     /// Print FDV header (alias for print_header)
-    pub fn print_fdv_header(&self, fdv_sol: Option<f64>) {
-        self.print_header(fdv_sol);
-    }
-
-    /// Update and re-print header with new FDV
-    pub fn update_fdv(&mut self, fdv_sol: f64) {
-        self.last_fdv = Some(fdv_sol);
-        self.print_header(Some(fdv_sol));
+    pub fn print_fdv_header(&self, fdv_sol: Option<f64>, mint_address: &str) {
+        self.print_header(fdv_sol, mint_address);
     }
 
     /// Print a trade event
