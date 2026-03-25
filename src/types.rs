@@ -97,6 +97,38 @@ impl PartialEq<[u8; 32]> for Pubkey {
     }
 }
 
+impl Pubkey {
+    /// Derive a Program Derived Address (PDA) from seeds and a program ID.
+    /// Implements the full Solana PDA derivation: tries bumps 255..0,
+    /// hashes seeds + [bump] + program_id + "ProgramDerivedAddress",
+    /// and returns the first result that is NOT on the ed25519 curve.
+    pub fn derive_pda(seeds: &[&[u8]], program_id: &Pubkey) -> Self {
+        use sha2::{Digest, Sha256};
+        use curve25519_dalek::edwards::CompressedEdwardsY;
+
+        for bump in (0u8..=255).rev() {
+            let mut hasher = Sha256::new();
+            for seed in seeds {
+                hasher.update(seed);
+            }
+            hasher.update(&[bump]);
+            hasher.update(program_id.as_ref());
+            hasher.update(b"ProgramDerivedAddress");
+
+            let hash: [u8; 32] = hasher.finalize().into();
+
+            // PDA must NOT be on the ed25519 curve
+            let point = CompressedEdwardsY(hash);
+            if point.decompress().is_none() {
+                return Pubkey(hash);
+            }
+        }
+
+        // Should never happen in practice
+        Pubkey([0u8; 32])
+    }
+}
+
 /// Simple Solana RPC client for metadata fetching
 pub struct SolanaRpcClient {
     rpc_url: String,
@@ -106,6 +138,7 @@ pub struct SolanaRpcClient {
 #[derive(Debug, Clone)]
 pub struct AccountInfo {
     pub data: Vec<u8>,
+    pub owner: String,
 }
 
 impl SolanaRpcClient {
@@ -149,6 +182,11 @@ impl SolanaRpcClient {
         // Parse using serde_json::Value for flexibility
         let json: serde_json::Value = serde_json::from_str(&response_text)?;
 
+        // Check if account exists
+        if json["result"]["value"].is_null() {
+            return Err(anyhow::anyhow!("Account not found: {}", pubkey));
+        }
+
         let data_array = json["result"]["value"]["data"]
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("Missing data array"))?;
@@ -161,6 +199,11 @@ impl SolanaRpcClient {
             .decode(base64_str)
             .map_err(|e| anyhow::anyhow!("Failed to decode base64: {}", e))?;
 
-        Ok(AccountInfo { data: decoded_data })
+        let owner = json["result"]["value"]["owner"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+
+        Ok(AccountInfo { data: decoded_data, owner })
     }
 }

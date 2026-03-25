@@ -1,5 +1,5 @@
 use crate::types::Pubkey;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde::Deserialize;
 
 /// WSOL mint address - treated as native SOL
@@ -188,7 +188,7 @@ fn parse_json_meta(meta_str: &str) -> Result<TransactionMeta> {
 }
 
 /// Parse metadata from binary format
-fn parse_binary_meta(meta_bytes: &[u8]) -> Result<TransactionMeta> {
+fn parse_binary_meta(_meta_bytes: &[u8]) -> Result<TransactionMeta> {
     // This is a simplified binary parser
     // In production, you'd want to use the full Solana binary format
 

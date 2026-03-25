@@ -3,9 +3,9 @@ pub mod websocket_client;
 
 // Use Yellowstone gRPC client (required architecture)
 pub use yellowstone_client::{
-    subscribe_transactions, StreamError, TransactionUpdate, OurTransaction,
+    StreamError, TransactionUpdate,
     load_auth_config,
 };
 
 // Re-export the generated types
-pub use yellowstone_client::geyser::{self, SubscribeUpdate, SubscribeRequest, CommitmentLevel, SubscribeRequestFilterTransactions};
+pub use yellowstone_client::geyser::{self, SubscribeUpdate};

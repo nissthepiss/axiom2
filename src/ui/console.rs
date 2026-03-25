@@ -1,6 +1,5 @@
 use crate::events::trade_event::{TradeEvent, TradeSide};
 use crate::types::Pubkey;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Console renderer for trade events
 pub struct ConsoleRenderer {

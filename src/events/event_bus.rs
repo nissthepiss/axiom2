@@ -1,6 +1,6 @@
 use crate::events::trade_event::TradeEvent;
 use tokio::sync::broadcast;
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Internal async event bus for TradeEvents
 /// Multiple consumers can subscribe to receive events

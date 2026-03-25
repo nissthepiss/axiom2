@@ -10,7 +10,6 @@ use geyser::{
     SubscribeUpdate,
     subscribe_update::UpdateOneof as SubscribeUpdateMessage,
     CommitmentLevel,
-    SubscribeRequestFilterSlots,
     SubscribeRequestFilterTransactions,
 };
 use futures::{stream::Stream, StreamExt};

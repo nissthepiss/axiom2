@@ -42,6 +42,8 @@ thiserror = "1.0"
 # Utilities
 base64 = "0.21"
 dotenvy = "0.15"
+sha2 = "0.10"
+curve25519-dalek = "4.1"
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }

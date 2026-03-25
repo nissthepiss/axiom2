@@ -1,11 +1,9 @@
 use futures::{stream::Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::error::Error as StdError;
 use thiserror::Error;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::protocol::Message,
-    WebSocketStream,
 };
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use base64::Engine as _;
