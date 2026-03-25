@@ -241,11 +241,21 @@ pub fn calculate_balance_deltas(
         }
     }
 
+    // Identify the AMM pool: the wallet holding the largest token balance.
+    let pool_wallet = wallet_token_deltas.iter()
+        .max_by_key(|(_, (pre, post))| (*pre).max(*post))
+        .map(|(wallet, _)| *wallet);
+
     let mut trades = Vec::new();
 
     for (wallet, (pre_amount, post_amount)) in &wallet_token_deltas {
         let token_delta = post_amount - pre_amount;
         if token_delta == 0 {
+            continue;
+        }
+
+        // Skip the AMM pool — only show user trades
+        if Some(*wallet) == pool_wallet {
             continue;
         }
 
@@ -260,6 +270,22 @@ pub fn calculate_balance_deltas(
         // Add WSOL delta (many DEXes use WSOL for swaps)
         if let Some(&wsol_delta) = wallet_wsol_deltas.get(wallet) {
             sol_delta += wsol_delta;
+        }
+
+        // If user has no direct SOL delta, estimate from the pool's WSOL movement
+        if sol_delta == 0 {
+            if let Some(pool) = pool_wallet {
+                if let Some(&pool_wsol) = wallet_wsol_deltas.get(&pool) {
+                    // Pool's WSOL delta is opposite to user's effective SOL movement
+                    // Scale by user's share of the token delta
+                    if let Some((pool_pre, pool_post)) = wallet_token_deltas.get(&pool) {
+                        let pool_token_delta = pool_post - pool_pre;
+                        if pool_token_delta != 0 {
+                            sol_delta = (pool_wsol as f64 * token_delta as f64 / pool_token_delta as f64) as i64;
+                        }
+                    }
+                }
+            }
         }
 
         // Filter out tiny movements

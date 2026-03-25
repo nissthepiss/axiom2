@@ -274,7 +274,7 @@ async fn process_transaction(
                 if let Some(fdv_sol) = fdv_engine.get_fdv_sol(tracked_mint) {
                     let fdv_usd = fdv_sol * sol_price;
                     let fdv_str = crate::engine::FdvEngine::format_fdv(fdv_usd);
-                    eprint!("\x1b[s\x1b[5;1H\x1b[2K  \x1b[38;5;245mMarket Cap (FDV):\x1b[0m \x1b[1;37m{}\x1b[0m\x1b[u", fdv_str);
+                    eprint!("\x1b[s\x1b[6;1H\x1b[2K  \x1b[38;5;245mMarket Cap (FDV):\x1b[0m \x1b[1;37m{}\x1b[0m\x1b[u", fdv_str);
                 }
 
                 // Format wallet address (first 4 + last 4 chars)
