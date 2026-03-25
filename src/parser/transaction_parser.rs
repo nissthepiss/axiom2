@@ -170,7 +170,6 @@ fn read_compact_u16(data: &[u8]) -> Result<(u16, usize)> {
                         (data[2] as u32)) as u16;
             Ok((value, 3))
         }
-        _ => Ok((0, 1)),
     }
 }
 
@@ -272,16 +271,57 @@ pub fn calculate_balance_deltas(
             sol_delta += wsol_delta;
         }
 
-        // If user has no direct SOL delta, estimate from the pool's WSOL movement
+        // If user has no direct SOL delta, estimate from the pool's movements.
+        // This handles pump.fun bonding curve txs where the user wallet isn't
+        // in our parsed account_keys (e.g. address lookup tables).
         if sol_delta == 0 {
             if let Some(pool) = pool_wallet {
+                // Try pool's WSOL movement first (standard DEX fallback)
                 if let Some(&pool_wsol) = wallet_wsol_deltas.get(&pool) {
-                    // Pool's WSOL delta is opposite to user's effective SOL movement
-                    // Scale by user's share of the token delta
                     if let Some((pool_pre, pool_post)) = wallet_token_deltas.get(&pool) {
                         let pool_token_delta = pool_post - pool_pre;
                         if pool_token_delta != 0 {
                             sol_delta = (pool_wsol as f64 * token_delta as f64 / pool_token_delta as f64) as i64;
+                        }
+                    }
+                }
+
+                // Still zero? Try the pool's native SOL delta (pump.fun bonding curve).
+                // The bonding curve receives SOL on buys and sends SOL on sells.
+                if sol_delta == 0 {
+                    if let Some(&pool_idx) = owner_to_index.get(&pool) {
+                        if pool_idx < meta.pre_balances.len() && pool_idx < meta.post_balances.len() {
+                            let pool_sol_delta = meta.post_balances[pool_idx] as i64 - meta.pre_balances[pool_idx] as i64;
+                            if let Some((pool_pre, pool_post)) = wallet_token_deltas.get(&pool) {
+                                let pool_token_delta = pool_post - pool_pre;
+                                if pool_token_delta != 0 {
+                                    // User's SOL movement is opposite to the pool's, scaled by share
+                                    sol_delta = -(pool_sol_delta as f64 * token_delta as f64 / pool_token_delta as f64) as i64;
+                                }
+                            }
+                        }
+                    }
+
+                    // Last resort: scan ALL account SOL deltas to find the largest
+                    // opposite movement that isn't the pool itself
+                    if sol_delta == 0 {
+                        // For a buy (token_delta > 0), user must have spent SOL (negative delta)
+                        // For a sell (token_delta < 0), user must have received SOL (positive delta)
+                        let expected_sign: i64 = if token_delta > 0 { -1 } else { 1 };
+                        let mut best_delta: i64 = 0;
+
+                        for idx in 0..meta.pre_balances.len().min(meta.post_balances.len()) {
+                            // Skip the pool's own index
+                            if Some(idx) == owner_to_index.get(&pool).copied() {
+                                continue;
+                            }
+                            let d = meta.post_balances[idx] as i64 - meta.pre_balances[idx] as i64;
+                            if d.signum() == expected_sign && d.abs() > best_delta.abs() {
+                                best_delta = d;
+                            }
+                        }
+                        if best_delta.abs() > MIN_SOL_DELTA {
+                            sol_delta = best_delta;
                         }
                     }
                 }

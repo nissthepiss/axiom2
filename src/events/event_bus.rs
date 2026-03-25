@@ -1,12 +1,12 @@
-use crate::events::trade_event::TradeEvent;
+use crate::events::trade_event::TelemetryEvent;
 use tokio::sync::broadcast;
 use tracing::debug;
 
-/// Internal async event bus for TradeEvents
-/// Multiple consumers can subscribe to receive events
+/// Async event bus for TelemetryEvents.
+/// Multiple consumers can subscribe independently.
 #[derive(Debug, Clone)]
 pub struct EventBus {
-    sender: broadcast::Sender<TradeEvent>,
+    sender: broadcast::Sender<TelemetryEvent>,
 }
 
 impl EventBus {
@@ -15,20 +15,20 @@ impl EventBus {
         Self { sender }
     }
 
-    /// Publish a trade event to all subscribers
-    pub fn publish(&self, event: TradeEvent) {
+    /// Publish an event to all subscribers
+    pub fn publish(&self, event: TelemetryEvent) {
         match self.sender.send(event) {
             Ok(receiver_count) => {
-                debug!("TradeEvent published to {} receivers", receiver_count);
+                debug!("TelemetryEvent published to {} receivers", receiver_count);
             }
             Err(_) => {
-                debug!("No active receivers for TradeEvent");
+                debug!("No active receivers for TelemetryEvent");
             }
         }
     }
 
-    /// Subscribe to trade events
-    pub fn subscribe(&self) -> broadcast::Receiver<TradeEvent> {
+    /// Subscribe to telemetry events
+    pub fn subscribe(&self) -> broadcast::Receiver<TelemetryEvent> {
         self.sender.subscribe()
     }
 

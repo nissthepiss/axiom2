@@ -1,47 +1,38 @@
-use serde::{Deserialize, Serialize};
 use crate::types::Pubkey;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TradeSide {
-    Buy,
-    Sell,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TradeEvent {
-    pub mint: Pubkey,
-    pub side: TradeSide,
-    pub sol_amount: f64,
-    pub token_amount: f64,
-    pub wallet: Pubkey,
-    pub price: f64,
-    pub slot: u64,
-    pub timestamp: i64,
-    pub tx_signature: String,
-}
-
-impl TradeEvent {
-    pub fn new(
-        mint: Pubkey,
-        side: TradeSide,
+/// Core event type flowing through the EventBus.
+/// Produced by the ingestion/enrichment layer, consumed by TUI, loggers, strategies.
+#[derive(Debug, Clone)]
+pub enum TelemetryEvent {
+    /// A parsed, enriched trade from a transaction
+    Trade {
+        timestamp: String,
+        epoch_secs: u64,
+        is_buy: bool,
         sol_amount: f64,
         token_amount: f64,
-        wallet: Pubkey,
         price: f64,
-        slot: u64,
-        timestamp: i64,
-        tx_signature: String,
-    ) -> Self {
-        Self {
-            mint,
-            side,
-            sol_amount,
-            token_amount,
-            wallet,
-            price,
-            slot,
-            timestamp,
-            tx_signature,
-        }
-    }
+        wallet: Pubkey,
+        wallet_short: String,
+        fdv_usd: Option<f64>,
+    },
+
+    /// FDV/market cap data point
+    FdvUpdate {
+        epoch_secs: u64,
+        fdv_usd: f64,
+    },
+
+    /// SOL/USD price refreshed
+    SolPriceUpdate {
+        price: f64,
+    },
+
+    /// Transaction fee accumulated (SOL)
+    FeeAccrued {
+        fee_sol: f64,
+    },
+
+    /// A transaction was processed (increments counter)
+    TxProcessed,
 }

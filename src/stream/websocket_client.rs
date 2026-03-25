@@ -143,7 +143,7 @@ struct Transaction {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct TransactionMeta {
+pub(crate) struct TransactionMeta {
     error: Option<String>,
     fee: u64,
     #[serde(rename = "preBalances")]
