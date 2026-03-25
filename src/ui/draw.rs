@@ -308,11 +308,31 @@ fn draw_orderflow_panel(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     // Collect trades with mcap data
-    let trades_with_mcap: Vec<_> = app
+    let mut trades_with_mcap: Vec<_> = app
         .trades
         .iter()
         .filter_map(|t| t.mcap_usd.map(|m| (m, t.sol_amount, t.is_buy)))
         .collect();
+
+    if trades_with_mcap.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "Waiting for data...",
+            Style::default().fg(TEXT_DIM),
+        )));
+        frame.render_widget(
+            Paragraph::new(lines).style(Style::default().bg(SURFACE)),
+            inner,
+        );
+        return;
+    }
+
+    // Outlier rejection: use median mcap, clip to 3x range
+    let mut mcap_vals: Vec<f64> = trades_with_mcap.iter().map(|(m, _, _)| *m).collect();
+    mcap_vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median_mcap = mcap_vals[mcap_vals.len() / 2];
+    let clip_lo = median_mcap / 3.0;
+    let clip_hi = median_mcap * 3.0;
+    trades_with_mcap.retain(|(m, _, _)| *m >= clip_lo && *m <= clip_hi);
 
     if trades_with_mcap.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -331,7 +351,7 @@ fn draw_orderflow_panel(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("BUYS            SELLS", Style::default().fg(TEXT_DIM)),
     ]));
 
-    // Find mcap range
+    // Find mcap range (outliers already clipped)
     let min_mcap = trades_with_mcap
         .iter()
         .map(|(m, _, _)| *m)

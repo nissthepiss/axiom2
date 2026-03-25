@@ -615,20 +615,44 @@ impl App {
             return (vec![], 0.0, 0.0, num_buckets);
         }
 
-        // Y range from real candles only
-        let global_low = candles.iter()
+        // Re-index: shift so first candle is at slot 0 (left-aligned)
+        // The chart grows from left to right as more data arrives
+        let first_slot = candles[0].0;
+        for entry in candles.iter_mut() {
+            entry.0 -= first_slot;
+        }
+        let used_slots = candles.last().map(|(idx, _)| idx + 1).unwrap_or(1);
+
+        // Outlier rejection for Y range: use median-based clipping
+        // Collect all close prices from real candles, find median, clip to 5x median range
+        let mut closes: Vec<f64> = candles.iter()
             .filter(|(_, c)| c.has_data)
+            .map(|(_, c)| c.close)
+            .collect();
+
+        if closes.is_empty() {
+            return (vec![], 0.0, 0.0, used_slots);
+        }
+
+        closes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = closes[closes.len() / 2];
+        // Clip: anything > 3x median or < median/3 is an outlier
+        let clip_low = median / 3.0;
+        let clip_high = median * 3.0;
+
+        let global_low = candles.iter()
+            .filter(|(_, c)| c.has_data && c.low >= clip_low && c.low <= clip_high)
             .map(|(_, c)| c.low)
             .fold(f64::INFINITY, f64::min);
         let global_high = candles.iter()
-            .filter(|(_, c)| c.has_data)
+            .filter(|(_, c)| c.has_data && c.high >= clip_low && c.high <= clip_high)
             .map(|(_, c)| c.high)
             .fold(f64::NEG_INFINITY, f64::max);
 
-        let global_low = if global_low.is_infinite() { candles[0].1.close } else { global_low };
-        let global_high = if global_high.is_infinite() { candles[0].1.close } else { global_high };
+        let global_low = if global_low.is_infinite() { median * 0.9 } else { global_low };
+        let global_high = if global_high.is_infinite() { median * 1.1 } else { global_high };
 
-        (candles, global_low, global_high, num_buckets)
+        (candles, global_low, global_high, used_slots)
     }
 
     /// Uptime as formatted string
