@@ -389,11 +389,6 @@ impl TransactionUpdate {
     pub fn from_update(update: &SubscribeUpdate) -> Option<Self> {
         match &update.update_oneof {
             Some(SubscribeUpdateMessage::Transaction(tx)) => {
-                println!("✓ Transaction in slot: {}", tx.slot);
-                if let Some(transaction) = &tx.transaction {
-                    println!("  Signature: {}", bs58::encode(&transaction.signature).into_string());
-                }
-
                 Some(TransactionUpdate {
                     slot: tx.slot,
                     transaction: Some(OurTransaction {

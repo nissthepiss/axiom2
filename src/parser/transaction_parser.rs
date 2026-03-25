@@ -1,6 +1,6 @@
 use crate::types::Pubkey;
 use anyhow::Result;
-use serde::Deserialize;
+use prost::Message;
 
 /// WSOL mint address - treated as native SOL
 pub const WSOL_MINT: &str = "So11111111111111111111111111111111111111112";
@@ -85,19 +85,53 @@ pub fn parse_transaction_message(transaction_bytes: &[u8]) -> Result<Vec<Pubkey>
     Ok(account_keys)
 }
 
-/// Parse transaction metadata from Yellowstone meta bytes
+/// Parse transaction metadata from Yellowstone protobuf-encoded meta bytes
 pub fn parse_transaction_meta(meta_bytes: &[u8]) -> Result<TransactionMeta> {
-    // For now, we'll try to parse as JSON first
-    // Yellowstone may provide meta as JSON or binary format
+    use crate::stream::geyser::TransactionStatusMeta as ProtoMeta;
 
-    if let Ok(meta_str) = std::str::from_utf8(meta_bytes) {
-        if let Ok(json_meta) = parse_json_meta(meta_str) {
-            return Ok(json_meta);
-        }
-    }
+    let proto_meta = ProtoMeta::decode(meta_bytes)
+        .map_err(|e| anyhow::anyhow!("Failed to decode protobuf TransactionStatusMeta: {}", e))?;
 
-    // Fallback: try binary parsing
-    parse_binary_meta(meta_bytes)
+    let pre_token_balances = proto_meta.pre_token_balances
+        .iter()
+        .filter_map(|tb| convert_token_balance(tb))
+        .collect();
+
+    let post_token_balances = proto_meta.post_token_balances
+        .iter()
+        .filter_map(|tb| convert_token_balance(tb))
+        .collect();
+
+    Ok(TransactionMeta {
+        err: proto_meta.err.map(|e| e.err),
+        fee: proto_meta.fee,
+        pre_balances: proto_meta.pre_balances,
+        post_balances: proto_meta.post_balances,
+        pre_token_balances,
+        post_token_balances,
+    })
+}
+
+/// Convert a protobuf TokenBalance to our local TokenBalance
+fn convert_token_balance(proto_tb: &crate::stream::geyser::TokenBalance) -> Option<TokenBalance> {
+    let mint: Pubkey = proto_tb.mint.parse().ok()?;
+    let owner = if proto_tb.owner.is_empty() {
+        None
+    } else {
+        proto_tb.owner.parse().ok()
+    };
+
+    let ui_amount = proto_tb.ui_token_amount.as_ref()?;
+    let amount: u64 = ui_amount.amount.parse().ok()?;
+    let decimals = ui_amount.decimals as u8;
+
+    Some(TokenBalance {
+        account_index: proto_tb.account_index,
+        mint,
+        amount,
+        decimals,
+        owner,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -108,99 +142,6 @@ pub struct TransactionMeta {
     pub post_balances: Vec<u64>,
     pub pre_token_balances: Vec<TokenBalance>,
     pub post_token_balances: Vec<TokenBalance>,
-}
-
-/// Parse metadata from JSON format (Yellowstone may provide this)
-fn parse_json_meta(meta_str: &str) -> Result<TransactionMeta> {
-    #[derive(Deserialize)]
-    struct JsonMeta {
-        #[serde(default)]
-        err: Option<serde_json::Value>,
-        #[serde(default)]
-        fee: u64,
-        #[serde(default)]
-        preBalances: Vec<u64>,
-        #[serde(default)]
-        postBalances: Vec<u64>,
-        #[serde(default)]
-        preTokenBalances: Option<Vec<JsonTokenBalance>>,
-        #[serde(default)]
-        postTokenBalances: Option<Vec<JsonTokenBalance>>,
-    }
-
-    #[derive(Deserialize)]
-    struct JsonTokenBalance {
-        accountIndex: u32,
-        mint: String,
-        uiTokenAmount: JsonUiTokenAmount,
-        owner: Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct JsonUiTokenAmount {
-        amount: String,
-        decimals: u32,
-        uiAmount: f64,
-    }
-
-    let json: JsonMeta = serde_json::from_str(meta_str)?;
-
-    let pre_token_balances = json.preTokenBalances
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|tb| {
-            let mint = tb.mint.parse().ok()?;
-            let amount = tb.uiTokenAmount.amount.parse().ok()?;
-            Some(TokenBalance {
-                account_index: tb.accountIndex,
-                mint,
-                amount,
-                decimals: tb.uiTokenAmount.decimals as u8,
-                owner: tb.owner.and_then(|o| o.parse().ok()),
-            })
-        })
-        .collect();
-
-    let post_token_balances = json.postTokenBalances
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|tb| {
-            let mint = tb.mint.parse().ok()?;
-            let amount = tb.uiTokenAmount.amount.parse().ok()?;
-            Some(TokenBalance {
-                account_index: tb.accountIndex,
-                mint,
-                amount,
-                decimals: tb.uiTokenAmount.decimals as u8,
-                owner: tb.owner.and_then(|o| o.parse().ok()),
-            })
-        })
-        .collect();
-
-    Ok(TransactionMeta {
-        err: None,
-        fee: json.fee,
-        pre_balances: json.preBalances,
-        post_balances: json.postBalances,
-        pre_token_balances,
-        post_token_balances,
-    })
-}
-
-/// Parse metadata from binary format
-fn parse_binary_meta(_meta_bytes: &[u8]) -> Result<TransactionMeta> {
-    // This is a simplified binary parser
-    // In production, you'd want to use the full Solana binary format
-
-    // For now, return empty metadata
-    Ok(TransactionMeta {
-        err: None,
-        fee: 0,
-        pre_balances: Vec::new(),
-        post_balances: Vec::new(),
-        pre_token_balances: Vec::new(),
-        post_token_balances: Vec::new(),
-    })
 }
 
 /// Read compact u16 (variable length integer)
@@ -245,119 +186,93 @@ pub fn calculate_balance_deltas(
     // Parse transaction meta
     let meta = parse_transaction_meta(meta_bytes)?;
 
-    // If we don't have account keys or balances, return empty
     if account_keys.is_empty() || meta.pre_balances.is_empty() {
         return Ok(Vec::new());
     }
 
+    let wsol_mint: Pubkey = WSOL_MINT.parse().unwrap_or_default();
+
+    // Build a map of owner -> (pre_token_amount, post_token_amount) for the target mint
+    let mut wallet_token_deltas: std::collections::HashMap<Pubkey, (i64, i64)> = std::collections::HashMap::new();
+
+    for tb in &meta.pre_token_balances {
+        if tb.mint == *target_mint {
+            if let Some(owner) = &tb.owner {
+                let entry = wallet_token_deltas.entry(*owner).or_insert((0, 0));
+                entry.0 += tb.amount as i64;
+            }
+        }
+    }
+    for tb in &meta.post_token_balances {
+        if tb.mint == *target_mint {
+            if let Some(owner) = &tb.owner {
+                let entry = wallet_token_deltas.entry(*owner).or_insert((0, 0));
+                entry.1 += tb.amount as i64;
+            }
+        }
+    }
+
+    // Build a map of owner -> WSOL delta (for swaps that use WSOL instead of native SOL)
+    let mut wallet_wsol_deltas: std::collections::HashMap<Pubkey, i64> = std::collections::HashMap::new();
+
+    for tb in &meta.pre_token_balances {
+        if tb.mint == wsol_mint {
+            if let Some(owner) = &tb.owner {
+                *wallet_wsol_deltas.entry(*owner).or_insert(0) -= tb.amount as i64;
+            }
+        }
+    }
+    for tb in &meta.post_token_balances {
+        if tb.mint == wsol_mint {
+            if let Some(owner) = &tb.owner {
+                *wallet_wsol_deltas.entry(*owner).or_insert(0) += tb.amount as i64;
+            }
+        }
+    }
+
+    // Build owner -> account_index map for SOL balance lookup
+    let mut owner_to_index: std::collections::HashMap<Pubkey, usize> = std::collections::HashMap::new();
+    for tb in meta.pre_token_balances.iter().chain(meta.post_token_balances.iter()) {
+        if let Some(owner) = &tb.owner {
+            // Find this owner in account_keys
+            if let Some(idx) = account_keys.iter().position(|k| k == owner) {
+                owner_to_index.insert(*owner, idx);
+            }
+        }
+    }
+
     let mut trades = Vec::new();
 
-    // Track processed wallets to avoid duplicates
-    let mut processed_wallets = std::collections::HashSet::new();
-
-    // Find token balance changes for the target mint
-    for pre_token in &meta.pre_token_balances {
-        if pre_token.mint != *target_mint {
-            continue;
-        }
-
-        let account_index = pre_token.account_index as usize;
-
-        // Find matching post token balance
-        let post_amount = meta.post_token_balances
-            .iter()
-            .find(|pt| pt.account_index == pre_token.account_index && pt.mint == *target_mint)
-            .map(|pt| pt.amount as i64)
-            .unwrap_or(0);
-
-        let pre_amount = pre_token.amount as i64;
+    for (wallet, (pre_amount, post_amount)) in &wallet_token_deltas {
         let token_delta = post_amount - pre_amount;
-
-        // Skip if no token change
         if token_delta == 0 {
             continue;
         }
 
-        // Get wallet address
-        let wallet = if account_index < account_keys.len() {
-            account_keys[account_index]
-        } else if let Some(owner) = &pre_token.owner {
-            *owner
-        } else {
-            continue;
-        };
-
-        // Skip if already processed this wallet
-        if !processed_wallets.insert(wallet) {
-            continue;
+        // Calculate SOL delta from native SOL balances (using owner's account index)
+        let mut sol_delta: i64 = 0;
+        if let Some(&idx) = owner_to_index.get(wallet) {
+            if idx < meta.pre_balances.len() && idx < meta.post_balances.len() {
+                sol_delta = meta.post_balances[idx] as i64 - meta.pre_balances[idx] as i64;
+            }
         }
 
-        // Calculate SOL delta
-        let sol_delta = if account_index < meta.pre_balances.len() && account_index < meta.post_balances.len() {
-            let pre_sol = meta.pre_balances[account_index] as i64;
-            let post_sol = meta.post_balances[account_index] as i64;
-            post_sol - pre_sol
-        } else {
-            0
-        };
+        // Add WSOL delta (many DEXes use WSOL for swaps)
+        if let Some(&wsol_delta) = wallet_wsol_deltas.get(wallet) {
+            sol_delta += wsol_delta;
+        }
 
-        // Filter out tiny SOL movements (fees)
-        const MIN_SOL_DELTA: i64 = 1_000_000; // 0.001 SOL in lamports
+        // Filter out tiny movements
+        const MIN_SOL_DELTA: i64 = 1_000; // 0.000001 SOL
         if sol_delta.abs() < MIN_SOL_DELTA {
             continue;
         }
 
-        // Detect swap direction
         let is_buy = token_delta > 0 && sol_delta < 0;
         let is_sell = token_delta < 0 && sol_delta > 0;
 
         if is_buy || is_sell {
-            trades.push(TradeEvent::new(wallet, token_delta, sol_delta));
-        }
-    }
-
-    // Also check post_token_balances for new token holders
-    for post_token in &meta.post_token_balances {
-        if post_token.mint != *target_mint {
-            continue;
-        }
-
-        // Skip if we already processed this account
-        if processed_wallets.len() > meta.pre_token_balances.len() {
-            // Check if this account was in pre balances
-            let account_index = post_token.account_index as usize;
-            let wallet = if account_index < account_keys.len() {
-                account_keys[account_index]
-            } else if let Some(owner) = &post_token.owner {
-                *owner
-            } else {
-                continue;
-            };
-
-            if !processed_wallets.contains(&wallet) {
-                // This is a new token holder
-                let token_delta = post_token.amount as i64;
-
-                // Calculate SOL delta
-                let sol_delta = if account_index < meta.pre_balances.len() && account_index < meta.post_balances.len() {
-                    let pre_sol = meta.pre_balances[account_index] as i64;
-                    let post_sol = meta.post_balances[account_index] as i64;
-                    post_sol - pre_sol
-                } else {
-                    0
-                };
-
-                // Filter out tiny SOL movements
-                const MIN_SOL_DELTA: i64 = 1_000_000;
-                if sol_delta.abs() < MIN_SOL_DELTA {
-                    continue;
-                }
-
-                let is_buy = token_delta > 0 && sol_delta < 0;
-                if is_buy {
-                    trades.push(TradeEvent::new(wallet, token_delta, sol_delta));
-                }
-            }
+            trades.push(TradeEvent::new(*wallet, token_delta, sol_delta));
         }
     }
 

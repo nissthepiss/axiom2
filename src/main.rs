@@ -16,7 +16,6 @@ use cli::resolve_mint;
 use crate::engine::{FdvEngine, PriceEngine};
 use crate::events::EventBus;
 use crate::stream::TransactionUpdate;
-use crate::stream::geyser;
 use crate::types::Pubkey;
 use crate::ui::ConsoleRenderer;
 use crate::parser::calculate_balance_deltas as parse_balance_deltas;
@@ -51,10 +50,6 @@ async fn main() -> anyhow::Result<()> {
     // Fetch token metadata from RPC
     let metadata = cli::fetch_token_metadata(&mint, rpc_url).await?;
 
-    // Print tracking info
-    println!("\nTracking {}", metadata.symbol);
-    println!("Mint: {}", mint);
-
     // Initialize engines
     let event_bus = EventBus::new(1000);
     let mut console = ConsoleRenderer::new(metadata.symbol.clone(), metadata.name.clone());
@@ -64,8 +59,10 @@ async fn main() -> anyhow::Result<()> {
     // Register token in FDV engine
     fdv_engine.register_token(mint, metadata.supply, metadata.decimals);
 
-    // Print header with initial FDV
+    // Print UI header
     console.print_banner();
+    let mint_str = mint.to_string();
+    println!("  \x1b[38;5;245mMint: {}...{}\x1b[0m", &mint_str[..4], &mint_str[mint_str.len()-4..]);
     console.print_fdv_header(None);
 
     // Subscribe to Yellowstone stream with transaction filter
@@ -75,13 +72,11 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Streaming transactions...");
 
-    // Main event loop with latency tracking
+    // Main event loop
     let mut tx_count = 0u64;
-    let stream_start = Instant::now();
 
     loop {
         tokio::select! {
-            // Process incoming stream updates
             Some(result) = async {
                 let start = Instant::now();
                 let item = futures::StreamExt::next(&mut stream).await;
@@ -90,46 +85,9 @@ async fn main() -> anyhow::Result<()> {
             } => {
                 let (update_result, latency) = result;
 
-                // Debug: log all results
-                if let Err(ref e) = update_result {
-                    eprintln!("⚠️  Stream error: {:?}", e);
-                }
-
                 if let Ok(update) = update_result {
-                    // Debug: log update type
-                    match &update.update_oneof {
-                        Some(geyser::subscribe_update::UpdateOneof::Transaction(_)) => {
-                            // Transaction - will be processed below
-                        }
-                        Some(geyser::subscribe_update::UpdateOneof::Slot(s)) => {
-                            eprintln!("⚠️  WARNING: Received slot update (not transaction): slot={}", s.slot);
-                        }
-                        Some(geyser::subscribe_update::UpdateOneof::Account(_)) => {
-                            eprintln!("📝 Account update received");
-                        }
-                        Some(geyser::subscribe_update::UpdateOneof::Ping(_)) => {
-                            eprintln!("📡 Ping received");
-                        }
-                        Some(geyser::subscribe_update::UpdateOneof::Pong(_)) => {
-                            eprintln!("📡 Pong received");
-                        }
-                        Some(geyser::subscribe_update::UpdateOneof::BlockMeta(b)) => {
-                            eprintln!("📦 Block meta: slot={}", b.slot);
-                        }
-                        None => {
-                            eprintln!("⚠️  Empty update received");
-                        }
-                    }
-
                     if let Some(tx_update) = TransactionUpdate::from_update(&update) {
                         tx_count += 1;
-
-                        // First transaction received - validation passed
-                        if tx_count == 1 {
-                            println!("\n✅ VALIDATION PASSED: Transaction data received from Yellowstone");
-                            println!("   First transaction arrived after {:.2}s\n", stream_start.elapsed().as_secs_f64());
-                        }
-
                         process_transaction(
                             tx_update,
                             &mint,
@@ -142,35 +100,10 @@ async fn main() -> anyhow::Result<()> {
                         ).await;
                     }
                 }
-
-                // Runtime validation: fail if no transactions after 10 seconds
-                let elapsed = stream_start.elapsed();
-                if elapsed.as_secs() >= 10 && tx_count == 0 {
-                    panic!(
-                        "\n❌ TEST FAILURE: No transactions received from Yellowstone stream after {:.1}s\n\
-                         This indicates the Yellowstone subscription is broken.\n\
-                         Possible causes:\n\
-                         - Wrong endpoint URL\n\
-                         - Authentication failure\n\
-                         - Subscription configured for slots instead of transactions\n\
-                         - Network connectivity issue\n\
-                         - Yellowstone service unavailable\n\
-                         \n\
-                         Current status:\n\
-                         - Endpoint: {}\n\
-                         - Subscription: transactions (not slots)\n\
-                         - Tracking token: {}\n",
-                        elapsed.as_secs_f64(),
-                        endpoint,
-                        mint
-                    );
-                }
             }
 
-            // Handle shutdown
             _ = tokio::signal::ctrl_c() => {
-                println!("\nShutting down...");
-                println!("Total transactions received: {}", tx_count);
+                println!("\n\x1b[38;5;245mShutting down... {} transactions processed\x1b[0m", tx_count);
                 break;
             }
         }
@@ -271,8 +204,6 @@ async fn subscribe_transactions_filtered(
         ping: None,
     };
 
-    println!("Subscribing to transactions for token: {}", token_mint);
-
     // Create a channel for bidirectional streaming
     let (tx, rx) = tokio::sync::mpsc::channel(1);
     tx.send(subscription).await?;
@@ -285,9 +216,6 @@ async fn subscribe_transactions_filtered(
         .subscribe(request_stream)
         .await?
         .into_inner();
-
-    println!("Transaction stream connected successfully");
-    println!("Filter: account_include=[{}]", token_mint);
 
     Ok(stream.map(|result| result.map_err(|e| stream::StreamError::StreamError(e.to_string()))))
 }
@@ -320,10 +248,7 @@ async fn process_transaction(
             // Calculate balance deltas using the parser
             let trades = match parse_balance_deltas(&tx.message, meta_bytes, tracked_mint) {
                 Ok(trades) => trades,
-                Err(e) => {
-                    eprintln!("Failed to parse balance deltas: {}", e);
-                    return;
-                }
+                Err(_) => return,
             };
 
             // Process each trade event
@@ -340,12 +265,16 @@ async fn process_transaction(
                     0.0
                 };
 
-                // Update price engine
+                // Update price engine and FDV
                 price_engine.update_price_for_mint(*tracked_mint, price);
+                fdv_engine.update_price(tracked_mint, price);
 
-                // Update FDV
-                if let Some(current_fdv) = fdv_engine.get_fdv_usd(tracked_mint, 0.0) {
-                    console.print_fdv_header(Some(current_fdv));
+                // Update Market Cap (FDV) display
+                let sol_price = console.sol_price();
+                if let Some(fdv_sol) = fdv_engine.get_fdv_sol(tracked_mint) {
+                    let fdv_usd = fdv_sol * sol_price;
+                    let fdv_str = crate::engine::FdvEngine::format_fdv(fdv_usd);
+                    eprint!("\x1b[s\x1b[5;1H\x1b[2K  \x1b[38;5;245mMarket Cap (FDV):\x1b[0m \x1b[1;37m{}\x1b[0m\x1b[u", fdv_str);
                 }
 
                 // Format wallet address (first 4 + last 4 chars)
@@ -366,10 +295,17 @@ async fn process_transaction(
                 let minutes = (secs % 3600) / 60;
                 let timestamp = format!("{:02}:{:02}:{:02}", hours, minutes, secs % 60);
 
-                // Print trade
-                println!("{} {:>4} {:.2} SOL {} {}ms",
+                // Color the trade type
+                let trade_colored = if trade.is_buy {
+                    format!("\x1b[1;32m {:>3}\x1b[0m", trade_type)
+                } else {
+                    format!("\x1b[1;31m{:>4}\x1b[0m", trade_type)
+                };
+
+                // Print trade line
+                println!("  \x1b[38;5;245m{}\x1b[0m  {}  \x1b[1;37m{:.4} SOL\x1b[0m  \x1b[38;5;245m{}  {}ms\x1b[0m",
                     timestamp,
-                    trade_type,
+                    trade_colored,
                     sol_amount_abs,
                     wallet_short,
                     latency.as_millis()

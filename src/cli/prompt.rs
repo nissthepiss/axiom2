@@ -67,26 +67,26 @@ pub async fn fetch_token_metadata(mint: &Pubkey, rpc_url: &str) -> Result<TokenM
     let account_info = client.get_account_info(mint).await
         .with_context(|| format!("Failed to fetch mint account for {}", mint))?;
 
-    // Parse mint account data
-    // The mint account data structure:
-    // - 0-31: mint authority option (32 bytes, optional)
-    // - 32-63: freeze authority option (32 bytes, optional)
-    // - 64-71: supply (u64, 8 bytes)
-    // - 72: decimals (u8, 1 byte)
-    // - 73: is_initialized flag (bool, 1 byte)
+    // Parse mint account data (SPL Token Mint struct layout):
+    // - 0-35: mint_authority COption<Pubkey> (4 byte discriminator + 32 byte pubkey)
+    // - 36-43: supply (u64, 8 bytes)
+    // - 44: decimals (u8, 1 byte)
+    // - 45: is_initialized (bool, 1 byte)
+    // - 46-81: freeze_authority COption<Pubkey> (36 bytes)
+    // Total: 82 bytes
 
-    if account_info.data.len() < 74 {
+    if account_info.data.len() < 82 {
         return Err(anyhow::anyhow!(
-            "Invalid mint account data: expected at least 74 bytes, got {}",
+            "Invalid mint account data: expected at least 82 bytes, got {}",
             account_info.data.len()
         ));
     }
 
-    let supply_bytes: [u8; 8] = account_info.data[64..72]
+    let supply_bytes: [u8; 8] = account_info.data[36..44]
         .try_into()
         .map_err(|_| anyhow::anyhow!("Failed to parse supply bytes"))?;
     let supply = u64::from_le_bytes(supply_bytes);
-    let decimals = account_info.data[72];
+    let decimals = account_info.data[44];
 
     // Determine metadata source based on token program
     let metadata = if account_info.owner == TOKEN_2022_PROGRAM_ID {

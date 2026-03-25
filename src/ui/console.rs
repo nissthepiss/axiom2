@@ -1,6 +1,15 @@
 use crate::events::trade_event::{TradeEvent, TradeSide};
 use crate::types::Pubkey;
 
+// ANSI 256-color codes
+const ORANGE: &str = "\x1b[38;5;208m";
+const ORANGE_BOLD: &str = "\x1b[1;38;5;208m";
+const GREY: &str = "\x1b[38;5;245m";
+const WHITE_BOLD: &str = "\x1b[1;37m";
+const GREEN_BOLD: &str = "\x1b[1;32m";
+const RED_BOLD: &str = "\x1b[1;31m";
+const RESET: &str = "\x1b[0m";
+
 /// Console renderer for trade events
 pub struct ConsoleRenderer {
     token_symbol: String,
@@ -15,8 +24,13 @@ impl ConsoleRenderer {
             token_symbol: symbol,
             token_name: name,
             last_fdv: None,
-            sol_price: 150.0, // Default SOL price, should be fetched from oracle
+            sol_price: 150.0,
         }
+    }
+
+    /// Get current SOL price
+    pub fn sol_price(&self) -> f64 {
+        self.sol_price
     }
 
     /// Set SOL price for USD calculations
@@ -24,18 +38,25 @@ impl ConsoleRenderer {
         self.sol_price = price;
     }
 
-    /// Print header with token info and current FDV
+    /// Print startup banner — clean minimal style
+    pub fn print_banner(&self) {
+        println!();
+        println!("  {ORANGE_BOLD}AXIOM TELEMETRY{RESET}");
+        println!("  {GREY}{}{RESET}", "─".repeat(45));
+    }
+
+    /// Print header: mint, SYMBOL - Name, FDV, separator
     pub fn print_header(&self, fdv_sol: Option<f64>) {
         let fdv_display = if let Some(fdv) = fdv_sol {
             let fdv_usd = fdv * self.sol_price;
-            crate::engine::FdvEngine::format_fdv(fdv_usd)
+            format!("{WHITE_BOLD}{}{RESET}", crate::engine::FdvEngine::format_fdv(fdv_usd))
         } else {
-            "Calculating...".to_string()
+            format!("{GREY}Calculating...{RESET}")
         };
 
-        println!("\n\x1b[1;36mTracking {}\x1b[0m", self.token_symbol);
-        println!("\x1b[1;33mFDV: {}\x1b[0m", fdv_display);
-        println!("\x1b[90m{}\x1b[0m", "─".repeat(40));
+        println!("  {ORANGE_BOLD}{}{RESET} {GREY}-{RESET} {WHITE_BOLD}{}{RESET}", self.token_symbol, self.token_name);
+        println!("  {GREY}Market Cap (FDV):{RESET} {fdv_display}");
+        println!("  {GREY}{}{RESET}", "─".repeat(45));
     }
 
     /// Print FDV header (alias for print_header)
@@ -53,13 +74,13 @@ impl ConsoleRenderer {
     pub fn print_trade(&self, trade: &TradeEvent) {
         let timestamp = Self::format_timestamp(trade.timestamp);
         let side_str = match trade.side {
-            TradeSide::Buy => "\x1b[1;32mBUY\x1b[0m",
-            TradeSide::Sell => "\x1b[1;31mSELL\x1b[0m",
+            TradeSide::Buy => format!("{GREEN_BOLD} BUY{RESET}"),
+            TradeSide::Sell => format!("{RED_BOLD}SELL{RESET}"),
         };
         let wallet = Self::shorten_address(trade.wallet);
 
         println!(
-            "{} | {} {:.4} SOL | Wallet: {}",
+            "  {GREY}{}{RESET}  {}  {WHITE_BOLD}{:.4} SOL{RESET}  {GREY}{}{RESET}",
             timestamp,
             side_str,
             trade.sol_amount,
@@ -81,16 +102,9 @@ impl ConsoleRenderer {
     fn shorten_address(pubkey: Pubkey) -> String {
         let addr = pubkey.to_string();
         if addr.len() > 8 {
-            format!("{}...{}", &addr[..3], &addr[addr.len() - 3..])
+            format!("{}...{}", &addr[..4], &addr[addr.len() - 4..])
         } else {
             addr
         }
-    }
-
-    /// Print startup banner
-    pub fn print_banner(&self) {
-        println!("\x1b[1;36m╔════════════════════════════════════════╗\x1b[0m");
-        println!("\x1b[1;36m║   Axiom Telemetry - Real-time CLI    \x1b[0m");
-        println!("\x1b[1;36m╚════════════════════════════════════════╝\x1b[0m");
     }
 }

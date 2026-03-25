@@ -60,14 +60,14 @@ impl FdvEngine {
         self.get_fdv_sol(mint).map(|fdv_sol| fdv_sol * sol_price)
     }
 
-    /// Format FDV as a string
+    /// Format FDV as a compact dollar string (e.g. "$223.3k", "$1.5M")
     pub fn format_fdv(fdv: f64) -> String {
         if fdv >= 1_000_000_000.0 {
-            format!("${:.2}B", fdv / 1_000_000_000.0)
+            format!("${:.1}B", fdv / 1_000_000_000.0)
         } else if fdv >= 1_000_000.0 {
-            format!("${:.2}M", fdv / 1_000_000.0)
+            format!("${:.1}M", fdv / 1_000_000.0)
         } else if fdv >= 1_000.0 {
-            format!("${:.2}K", fdv / 1_000.0)
+            format!("${:.1}k", fdv / 1_000.0)
         } else {
             format!("${:.2}", fdv)
         }
